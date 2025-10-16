@@ -14,7 +14,13 @@ import { HITLApprovalService } from '../HITLApprovalService';
 type MCPServerConfig = {
     command: string;
     args: string[];
-    env: Record<string, string>;
+    env: Record<string, string>; 
+};
+
+type MCPPolicyConfig = {
+    command: string;
+    args: string[];
+    env: string[];    
     HighRiskTools: string[];
     BlockedTools: string[]
 };
@@ -56,16 +62,39 @@ class HITLProxy {
       // requestId: number; 
   }> = new Map();
 
-  private static readonly MCPServerMap: Record<string, MCPServerConfig> = {
+  private static readonly MCPServerMap: Record<string, MCPPolicyConfig> = {
       "todo-mcp-server": { // <--- This is now a simple object
           command: "/usr/bin/node",
-          args: ["dist/mcp-server/todo-mcp-server-http.js"],
-          env: { ACCESS_TOKEN: `${process.env.ACCESS_TOKEN}` },
+                    args: ["dist/mcp-server/todo-mcp-server-http.js"],
+          env: ["ACCESS_TOKEN"],
           HighRiskTools: ["add_todos"],
           BlockedTools: ["welcome_to_okta"]
       },
       // ... other server configs
   };
+
+  
+  public getResolvedConfig(serverId: string): MCPServerConfig {
+      const sourceConfig = HITLProxy.MCPServerMap[serverId];
+
+      if (!sourceConfig) {
+          throw new Error(`Configuration not found for server ID: ${serverId}`);
+      }
+
+      // Use the array of keys to dynamically look up values using bracket notation
+      const resolvedEnv = sourceConfig.env.reduce((acc, key) => {
+        // This is the core logic: process.env[key]
+        acc[key] = process.env[key];
+        return acc;
+      }, {} as Record<string, string | undefined>);
+
+      // Return the new, resolved configuration object
+      return {
+        command: sourceConfig.command,
+        args: sourceConfig.args,
+        env: resolvedEnv as Record<string, string>,
+    };
+  }
 
   public static async create(serverName: string): Promise<HITLProxy> {        
         const instance = new HITLProxy(serverName);
@@ -102,7 +131,7 @@ class HITLProxy {
   }
 
    private async initializeDownstreamConnection(): Promise<void> {
-        const config = HITLProxy.MCPServerMap[this.downstreamServerName];
+        const config = this.getResolvedConfig(this.downstreamServerName);
         if (!config) {
             throw new Error(`Transport config for ${this.downstreamServerName} not found.`);
         }
@@ -118,7 +147,7 @@ class HITLProxy {
 
   private async getTools(): Promise<ToolDefinition[]> {
 
-    const config = HITLProxy.MCPServerMap[this.downstreamServerName];
+    const config = this.getResolvedConfig(this.downstreamServerName);
     if (!config) {
         console.error(`Transport config for ${this.downstreamServerName} not found.`);
         return [];
@@ -280,11 +309,11 @@ class HITLProxy {
           }
           const startTime = Date.now();
           var lastresult;
-          while (Date.now() < (startTime + 10000)) { // 30000
+          while (Date.now() < (startTime + 20000)) { // 20 Seconds (60 seconds will timeout)
             const result = await this.handleTaskStatusCheck(args.taskId);
             lastresult = result ?? lastresult;
             const status = result?.structuredContent?.status;
-             if (status && status !== 'PENDING') {
+             if (status && status !== 'PENDING'|| status === 'DENIED') {
               return result;
              }
              await new Promise(r => setTimeout(r, 4000));
@@ -356,8 +385,13 @@ class HITLProxy {
               isError: true,
               content: [{ 
                   type: 'text', 
-                  text: `Task ${taskId} approval failed or was denied. Status: ${error.error || 'DENIED/FAILED'}.` 
+                  //text: `Task ${taskId} approval failed or was denied. Status: ${error.error || 'DENIED/FAILED'}.` 
+                  text: `Task ${taskId} approval was denied do not continue to try this request. }.` 
               }],
+              structuredContent: { 
+                  status: 'DENIED', // Explicitly state the DENIED status
+                  tool: task.toolName 
+              }
           };
       }
   }

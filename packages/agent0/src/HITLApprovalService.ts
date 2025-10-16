@@ -10,7 +10,7 @@ function throwExpression(message: string): never {
  */
 export class HITLApprovalService {
     // Okta base URL for the authorization server
-    private readonly baseUrl: string = 'https://login.okta.team/oauth2/v1';
+    private readonly baseUrl: string = `https://${process.env.APPROVALSERVICEORG}/oauth2/v1`;
     
     // Configuration properties
     private readonly clientId: string;
